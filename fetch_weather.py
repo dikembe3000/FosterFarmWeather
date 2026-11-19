@@ -26,6 +26,7 @@ KEEP = [
     "hourlyrainin", "dailyrainin", "weeklyrainin", "monthlyrainin",
     "solarradiation", "uv",
     "tempinf", "humidityin",
+    "battout",
 ]
 
 
@@ -46,9 +47,11 @@ def slim(rec):
 
 
 def fetch(mac, end_ms=None):
+    api_key = os.environ.get("AWN_API_KEY", "").strip()
+    app_key = os.environ.get("AWN_APP_KEY", "").strip()
     params = {
-        "apiKey": os.environ["AWN_API_KEY"],
-        "applicationKey": os.environ["AWN_APP_KEY"],
+        "apiKey": api_key,
+        "applicationKey": app_key,
         "limit": 288,
     }
     if end_ms is not None:
@@ -60,6 +63,12 @@ def fetch(mac, end_ms=None):
     except requests.RequestException as e:
         # Don't print the exception text: it contains the request URL (with keys).
         status = getattr(getattr(e, "response", None), "status_code", "n/a")
+        print(
+            "Diagnostics (lengths only): "
+            f"AWN_API_KEY={len(api_key)} (expect 64), "
+            f"AWN_APP_KEY={len(app_key)} (expect 64), "
+            f"AWN_MAC={len(mac)} (expect 17)"
+        )
         sys.exit(f"Request to Ambient Weather failed (HTTP status: {status})")
     if not isinstance(data, list):
         sys.exit(f"Unexpected API response: {str(data)[:200]}")
@@ -107,7 +116,7 @@ def oldest_ts(records):
 
 
 def main():
-    mac = os.environ["AWN_MAC"]
+    mac = os.environ.get("AWN_MAC", "").strip()
     backfill_days = int(os.environ.get("BACKFILL_DAYS") or 0)
 
     records = fetch(mac)

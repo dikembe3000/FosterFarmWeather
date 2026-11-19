@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Home Weather</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<style>
+  :root{
+    --bg:#111217; --panel:#181b1f; --border:#2a2d33; --text:#d8d9da; --muted:#8e9096;
+    --blue:#5794f2; --green:#73bf69; --yellow:#fade2a; --orange:#ff9830; --red:#f2495c; --purple:#b877d9; --cyan:#8ab8ff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--border);background:var(--panel);position:sticky;top:0;z-index:5}
+  h1{font-size:18px;margin:0;font-weight:600}
+  .sub{color:var(--muted);font-size:12px}
+  .controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  select,input,button{background:#0b0c0f;color:var(--text);border:1px solid var(--border);border-radius:4px;padding:6px 8px;font:inherit}
+  button{cursor:pointer}
+  button:hover{border-color:var(--orange)}
+  button.primary{background:var(--orange);color:#111;border-color:var(--orange);font-weight:600}
+  #custom{display:none;gap:6px;align-items:center}
+  #custom.on{display:flex}
+  main{padding:16px;display:grid;gap:12px}
+  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+  .tile,.panel{background:var(--panel);border:1px solid var(--border);border-radius:4px}
+  .tile{padding:10px 12px;text-align:center;min-height:110px;display:flex;flex-direction:column;justify-content:center}
+  .tile .label{font-size:13px;font-weight:600;color:var(--text)}
+  .tile .value{font-size:42px;font-weight:600;line-height:1.1;margin-top:6px}
+  .tile .unit{font-size:20px;color:var(--muted);margin-left:3px}
+  .tile .note{font-size:11px;color:var(--muted)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:12px}
+  .panel{padding:10px 12px}
+  .panel h2{font-size:13px;margin:0 0 8px;text-align:center;font-weight:600}
+  .chartbox{position:relative;height:260px}
+  .rose{display:flex;flex-direction:column;align-items:center}
+  .legend{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;font-size:12px;color:var(--muted);margin-top:6px}
+  .legend i{display:inline-block;width:10px;height:10px;margin-right:4px;border-radius:2px}
+  #status{padding:0 16px 16px;color:var(--muted);font-size:12px}
+  #error{display:none;margin:16px;padding:12px;border:1px solid var(--red);border-radius:4px;color:var(--red)}
+  @media(max-width:520px){.grid{grid-template-columns:1fr}.tile .value{font-size:34px}}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Home Weather</h1>
+    <div class="sub" id="updated">Loading…</div>
+  </div>
+  <div class="controls">
+    <select id="preset">
+      <option value="21600000">Last 6 hours</option>
+      <option value="86400000" selected>Last 24 hours</option>
+      <option value="259200000">Last 3 days</option>
+      <option value="604800000">Last 7 days</option>
+      <option value="2592000000">Last 30 days</option>
+      <option value="7776000000">Last 90 days</option>
+      <option value="custom">Custom range…</option>
+    </select>
+    <span id="custom">
+      <input type="datetime-local" id="from"> to <input type="datetime-local" id="to">
+      <button id="apply" class="primary">Apply</button>
+    </span>
+    <button id="dlcsv">Download CSV</button>
+    <button id="dljson">Download JSON</button>
+  </div>
+</header>
+
+<div id="error"></div>
+<main>
+  <section class="tiles" id="tiles"></section>
+  <section class="grid">
+    <div class="panel rose" id="rosePanel">
+      <h2>Wind Speed vs Wind Direction</h2>
+      <div id="rose"></div>
+      <div class="legend" id="roseLegend"></div>
+    </div>
+    <div class="panel" id="p_wind"><h2>Wind &amp; Gust Speed</h2><div class="chartbox"><canvas></canvas></div></div>
+    <div class="panel" id="p_temp"><h2>Temperature</h2><div class="chartbox"><canvas></canvas></div></div>
+    <div class="panel" id="p_hum"><h2>Humidity</h2><div class="chartbox"><canvas></canvas></div></div>
+    <div class="panel" id="p_baro"><h2>Pressure</h2><div class="chartbox"><canvas></canvas></div></div>
+    <div class="panel" id="p_rain"><h2>Rain (daily total)</h2><div class="chartbox"><canvas></canvas></div></div>
+    <div class="panel" id="p_solar"><h2>Solar Radiation</h2><div class="chartbox"><canvas></canvas></div></div>
+    <div class="panel" id="p_uv"><h2>UV Index</h2><div class="chartbox"><canvas></canvas></div></div>
+    <div class="panel" id="p_indoor"><h2>Indoor Temperature</h2><div class="chartbox"><canvas></canvas></div></div>
+  </section>
+</main>
+<div id="status"></div>
+
+<script>
+"use strict";
+
+// ---------- configuration ----------
+const PANELS = [
+  { id:"p_wind",   unit:"mph",  series:[
+      { key:"windspeedmph", label:"Wind", color:"#5794f2", agg:"mean" },
+      { key:"windgustmph",  label:"Gust", color:"#fade2a", agg:"max"  } ] },
+  { id:"p_temp",   unit:"°F",   series:[
+      { key:"tempf",     label:"Temp",       color:"#ff9830", agg:"mean" },
+      { key:"feelsLike", label:"Feels like", color:"#f2495c", agg:"mean" },
+      { key:"dewPoint",  label:"Dew point",  color:"#73bf69", agg:"mean" } ] },
+  { id:"p_hum",    unit:"%",    series:[{ key:"humidity",     label:"Humidity", color:"#5794f2", agg:"mean" }] },
+  { id:"p_baro",   unit:"inHg", series:[{ key:"baromrelin",   label:"Pressure", color:"#b877d9", agg:"mean" }] },
+  { id:"p_rain",   unit:"in",   series:[{ key:"dailyrainin",  label:"Daily rain", color:"#8ab8ff", agg:"max", step:true }] },
+  { id:"p_solar",  unit:"W/m²", series:[{ key:"solarradiation", label:"Solar", color:"#fade2a", agg:"mean" }] },
+  { id:"p_uv",     unit:"",     series:[{ key:"uv",           label:"UV", color:"#ff9830", agg:"max" }] },
+  { id:"p_indoor", unit:"°F",   series:[{ key:"tempinf",      label:"Indoor", color:"#73bf69", agg:"mean" }] },
+];
+const ROSE_BINS = [
+  { lo:0,  hi:3,        color:"#4a3fd1", label:"0–3 mph" },
+  { lo:3,  hi:6,        color:"#3b8bd9", label:"3–6 mph" },
+  { lo:6,  hi:10,       color:"#33b89a", label:"6–10 mph" },
+  { lo:10, hi:15,       color:"#8fd44f", label:"10–15 mph" },
+  { lo:15, hi:Infinity, color:"#fade2a", label:"15+ mph" },
+];
+const COMPASS = ["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"];
+const MAX_POINTS = 1200;
+const REFRESH_MS = 5 * 60 * 1000;
+
+// ---------- state ----------
+let index = null;
+let rows = [];
+const dayCache = new Map();
+const charts = {};
+
+// ---------- helpers ----------
+const $ = id => document.getElementById(id);
+const num = v => typeof v === "number" && isFinite(v);
+const utcDay = ms => new Date(ms).toISOString().slice(0, 10);
+const fmtLocal = ms => new Date(ms).toLocaleString("sv-SE");   // 2026-11-18 21:30:00
+const pad = n => String(n).padStart(2, "0");
+const toInputValue = ms => { const d = new Date(ms); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+const vals = (list, key) => list.map(r => r[key]).filter(num);
+
+async function getJSON(url) {
+  const sep = url.includes("?") ? "&" : "?";
+  const r = await fetch(url + sep + "_=" + Date.now(), { cache: "no-store" });
+  if (!r.ok) throw new Error(`${url} -> HTTP ${r.status}`);
+  return r.json();
+}
+
+function currentRange() {
+  const v = $("preset").value;
+  if (v === "custom") {
+    const f = Date.parse($("from").value), t = Date.parse($("to").value);
+    if (!isFinite(f) || !isFinite(t) || f >= t) throw new Error("Pick a valid start and end time.");
+    return [f, t];
+  }
+  const now = Date.now();
+  return [now - Number(v), now];
+}
+
+async function loadRange(from, to) {
+  const have = new Set(index.days);
+  const recent = utcDay(Date.now() - 86400000);
+  const days = [];
+  for (let d = Date.parse(utcDay(from) + "T00:00:00Z"); d <= to; d += 86400000) days.push(utcDay(d));
+  await Promise.all(days.filter(d => have.has(d)).map(async d => {
+    if (!dayCache.has(d) || d >= recent) dayCache.set(d, await getJSON(`data/${d}.json`));
+  }));
+  const out = [];
+  for (const d of days) for (const r of (dayCache.get(d) || [])) if (r.t >= from && r.t <= to) out.push(r);
+  out.sort((a, b) => a.t - b.t);
+  return out;
+}
+
+// reduce to <= MAX_POINTS by bucketing
+function series(list, key, agg) {
+  const pts = list.filter(r => num(r[key]));
+  const step = Math.max(1, Math.ceil(pts.length / MAX_POINTS));
+  const out = [];
+  for (let i = 0; i < pts.length; i += step) {
+    const chunk = pts.slice(i, i + step);
+    const v = chunk.map(r => r[key]);
+    const y = agg === "max" ? Math.max(...v) : v.reduce((a, b) => a + b, 0) / v.length;
+    out.push({ x: chunk[Math.floor(chunk.length / 2)].t, y: Math.round(y * 1000) / 1000 });
+  }
+  return out;
+}
+
+// ---------- tiles ----------
+function tile(label, value, unit, color, note) {
+  return `<div class="tile"><div class="label">${label}</div>
+    <div class="value" style="color:${color}">${value}<span class="unit">${unit}</span></div>
+    ${note ? `<div class="note">${note}</div>` : ""}</div>`;
+}
+const fmt = (v, d = 1) => num(v) ? v.toFixed(d).replace(/\.0$/, "") : "–";
+
+function avgDirection(list) {
+  let sx = 0, sy = 0;
+  for (const r of list) {
+    if (!num(r.winddir)) continue;
+    const w = num(r.windspeedmph) ? r.windspeedmph : 1;
+    sx += w * Math.sin(r.winddir * Math.PI / 180);
+    sy += w * Math.cos(r.winddir * Math.PI / 180);
+  }
+  if (!sx && !sy) return null;
+  return (Math.atan2(sx, sy) * 180 / Math.PI + 360) % 360;
+}
+
+function rainTotal(list) {
+  let total = 0, prev = null;
+  for (const r of list) {
+    if (!num(r.dailyrainin)) continue;
+    if (prev !== null && r.dailyrainin > prev) total += r.dailyrainin - prev;
+    prev = r.dailyrainin;
+  }
+  return total;
+}
+
+function renderTiles() {
+  const latest = index.latest || {};
+  const temps = vals(rows, "tempf"), hums = vals(rows, "humidity"), gusts = vals(rows, "windgustmph");
+  const dir = avgDirection(rows);
+  const t = [];
+  if (num(latest.tempf)) t.push(tile("Current Temp", fmt(latest.tempf), "°F", "#ff9830", num(latest.feelsLike) ? `Feels like ${fmt(latest.feelsLike)}°F` : ""));
+  if (gusts.length) t.push(tile("Max Gust", fmt(Math.max(...gusts)), "mph", "#fade2a"));
+  if (temps.length) {
+    t.push(tile("Min Temp", fmt(Math.min(...temps)), "°F", "#5794f2"));
+    t.push(tile("Max Temp", fmt(Math.max(...temps)), "°F", "#d8d9da"));
+  }
+  if (hums.length) {
+    t.push(tile("Min Humidity", fmt(Math.min(...hums), 0), "%", "#b9c3cc"));
+    t.push(tile("Max Humidity", fmt(Math.max(...hums), 0), "%", "#5794f2"));
+  }
+  if (dir !== null) t.push(tile("Avg. Wind Direction", Math.round(dir), "°", "#73bf69", COMPASS[Math.round(dir / 22.5) % 16]));
+  if (vals(rows, "dailyrainin").length) t.push(tile("Rain (range)", rainTotal(rows).toFixed(2), "in", "#8ab8ff"));
+  if (num(latest.baromrelin)) t.push(tile("Pressure", fmt(latest.baromrelin, 2), "inHg", "#b877d9"));
+  $("tiles").innerHTML = t.join("") || '<div class="tile"><div class="label">No data in this range</div></div>';
+}
+
+// ---------- wind rose (SVG) ----------
+function renderRose() {
+  const panel = $("rosePanel");
+  const pts = rows.filter(r => num(r.winddir) && num(r.windspeedmph));
+  if (!pts.length) { panel.style.display = "none"; return; }
+  panel.style.display = "";
+  const counts = Array.from({ length: 16 }, () => ROSE_BINS.map(() => 0));
+  for (const r of pts) {
+    const s = Math.round(r.winddir / 22.5) % 16;
+    const b = ROSE_BINS.findIndex(x => r.windspeedmph >= x.lo && r.windspeedmph < x.hi);
+    counts[s][b < 0 ? ROSE_BINS.length - 1 : b]++;
+  }
+  const total = pts.length;
+  const sectorPct = counts.map(c => c.reduce((a, b) => a + b, 0) / total * 100);
+  const maxPct = Math.max(...sectorPct);
+  const ringStep = maxPct > 40 ? 20 : maxPct > 20 ? 10 : maxPct > 10 ? 5 : 2;
+  const rmaxPct = Math.ceil(maxPct / ringStep) * ringStep || ringStep;
+
+  const size = 340, c = size / 2, R = 125;
+  const P = (r, deg) => { const a = deg * Math.PI / 180; return [c + r * Math.sin(a), c - r * Math.cos(a)]; };
+  let svg = `<svg viewBox="0 0 ${size} ${size}" width="100%" style="max-width:380px">`;
+  for (let p = ringStep; p <= rmaxPct; p += ringStep) {
+    const rr = R * p / rmaxPct;
+    svg += `<circle cx="${c}" cy="${c}" r="${rr}" fill="none" stroke="#3a3d44" stroke-dasharray="3 3"/>`;
+    svg += `<text x="${c + 3}" y="${c - rr - 2}" font-size="9" fill="#8e9096">${p}%</text>`;
+  }
+  for (let i = 0; i < 8; i++) {
+    const [x, y] = P(R, i * 45);
+    svg += `<line x1="${c}" y1="${c}" x2="${x}" y2="${y}" stroke="#3a3d44"/>`;
+  }
+  counts.forEach((cnt, i) => {
+    const center = i * 22.5, a0 = center - 9.5, a1 = center + 9.5;
+    let acc = 0;
+    cnt.forEach((n, b) => {
+      if (!n) return;
+      const r0 = R * acc / total * 100 / rmaxPct;
+      acc += n;
+      const r1 = R * acc / total * 100 / rmaxPct;
+      const [x1, y1] = P(r1, a0), [x2, y2] = P(r1, a1), [x3, y3] = P(r0, a1), [x4, y4] = P(r0, a0);
+      const inner = r0 > 0.01 ? `A ${r0} ${r0} 0 0 0 ${x4} ${y4}` : `L ${c} ${c}`;
+      svg += `<path d="M ${x1} ${y1} A ${r1} ${r1} 0 0 1 ${x2} ${y2} L ${x3} ${y3} ${inner} Z" fill="${ROSE_BINS[b].color}" opacity="0.92"><title>${COMPASS[i]} · ${ROSE_BINS[b].label}: ${(n / total * 100).toFixed(1)}%</title></path>`;
+    });
+  });
+  [["N",0],["NE",45],["E",90],["SE",135],["S",180],["SW",225],["W",270],["NW",315]].forEach(([l, d]) => {
+    const [x, y] = P(R + 18, d);
+    svg += `<text x="${x}" y="${y + 4}" font-size="12" fill="#d8d9da" text-anchor="middle">${l}</text>`;
+  });
+  svg += "</svg>";
+  $("rose").innerHTML = svg;
+  $("roseLegend").innerHTML = ROSE_BINS.map(b => `<span><i style="background:${b.color}"></i>${b.label}</span>`).join("");
+}
+
+// ---------- charts ----------
+function renderCharts() {
+  for (const p of PANELS) {
+    const el = $(p.id);
+    const datasets = p.series.map(s => ({
+      label: s.label, data: series(rows, s.key, s.agg),
+      borderColor: s.color, backgroundColor: s.color + "33",
+      borderWidth: 1.6, pointRadius: 0, tension: s.step ? 0 : 0.25, stepped: !!s.step,
+      fill: p.series.length === 1,
+    })).filter(d => d.data.length);
+    if (!datasets.length) { el.style.display = "none"; if (charts[p.id]) { charts[p.id].destroy(); delete charts[p.id]; } continue; }
+    el.style.display = "";
+    if (charts[p.id]) {
+      charts[p.id].data.datasets = datasets;
+      charts[p.id].update("none");
+      continue;
+    }
+    charts[p.id] = new Chart(el.querySelector("canvas"), {
+      type: "line",
+      data: { datasets },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        interaction: { mode: "index", intersect: false },
+        parsing: false,
+        scales: {
+          x: { type: "time", grid: { color: "#23262b" }, ticks: { color: "#8e9096", maxRotation: 0, autoSkipPadding: 24 } },
+          y: { grid: { color: "#23262b" }, ticks: { color: "#8e9096", callback: v => v + (p.unit ? " " + p.unit : "") } },
+        },
+        plugins: {
+          legend: { labels: { color: "#d8d9da", boxWidth: 12 }, display: datasets.length > 1 },
+          tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.parsed.y}${p.unit ? " " + p.unit : ""}` } },
+        },
+      },
+    });
+  }
+}
+
+// ---------- download ----------
+function rangeLabel() {
+  if (!rows.length) return "empty";
+  const f = t => new Date(t).toISOString().slice(0, 16).replace(/[-:T]/g, "");
+  return `${f(rows[0].t)}_to_${f(rows[rows.length - 1].t)}`;
+}
+function saveBlob(text, type, name) {
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const a = Object.assign(document.createElement("a"), { href: url, download: name });
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+function downloadCSV() {
+  if (!rows.length) return alert("No data in the selected range.");
+  const keys = [...new Set(rows.flatMap(r => Object.keys(r)))].filter(k => k !== "t");
+  const lines = [["time_utc", "time_local", ...keys].join(",")];
+  for (const r of rows) {
+    lines.push([new Date(r.t).toISOString(), fmtLocal(r.t), ...keys.map(k => num(r[k]) ? r[k] : "")].join(","));
+  }
+  saveBlob(lines.join("\n"), "text/csv", `weather_${rangeLabel()}.csv`);
+}
+function downloadJSON() {
+  if (!rows.length) return alert("No data in the selected range.");
+  const out = rows.map(r => ({ time_utc: new Date(r.t).toISOString(), ...r }));
+  saveBlob(JSON.stringify(out, null, 1), "application/json", `weather_${rangeLabel()}.json`);
+}
+
+// ---------- main ----------
+async function refresh(reloadIndex = true) {
+  try {
+    $("error").style.display = "none";
+    if (reloadIndex || !index) index = await getJSON("data/index.json");
+    const [from, to] = currentRange();
+    rows = await loadRange(from, to);
+    renderTiles(); renderRose(); renderCharts();
+    const first = index.days[0];
+    $("updated").textContent = index.latest ? `Last reading: ${fmtLocal(index.latest.t)}` : "No readings yet";
+    $("status").textContent = `${rows.length} readings · ${fmtLocal(from)} → ${fmtLocal(to)}` +
+      (first ? ` · history on file since ${first} (UTC)` : "");
+  } catch (e) {
+    const box = $("error");
+    box.style.display = "block";
+    box.textContent = "Could not load data: " + e.message +
+      " (If this is a fresh repo, run the GitHub Action once so data/ is created.)";
+  }
+}
+
+$("preset").addEventListener("change", () => {
+  const custom = $("preset").value === "custom";
+  $("custom").classList.toggle("on", custom);
+  if (custom && !$("from").value) {
+    $("to").value = toInputValue(Date.now());
+    $("from").value = toInputValue(Date.now() - 7 * 86400000);
+  }
+  if (!custom) refresh(false);
+});
+$("apply").addEventListener("click", () => refresh(false));
+$("dlcsv").addEventListener("click", downloadCSV);
+$("dljson").addEventListener("click", downloadJSON);
+
+refresh();
+setInterval(() => { if ($("preset").value !== "custom") refresh(true); }, REFRESH_MS);
+</script>
+</body>
+</html>

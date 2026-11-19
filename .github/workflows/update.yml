@@ -1,0 +1,50 @@
+name: Update weather data
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"   # every 10 min (GitHub may delay scheduled runs)
+  workflow_dispatch:
+    inputs:
+      backfill_days:
+        description: "One-time: also load this many past days (0 = just latest)"
+        default: "0"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: weather-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install requests
+
+      - name: Fetch weather data
+        run: python fetch_weather.py
+        env:
+          AWN_API_KEY: ${{ secrets.AWN_API_KEY }}
+          AWN_APP_KEY: ${{ secrets.AWN_APP_KEY }}
+          AWN_MAC: ${{ secrets.AWN_MAC }}
+          BACKFILL_DAYS: ${{ github.event.inputs.backfill_days || '0' }}
+
+      - name: Commit data
+        run: |
+          git config user.name "weather-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add data
+          if git diff --staged --quiet; then
+            echo "No changes"
+          else
+            git commit -m "Update weather data"
+            git pull --rebase
+            git push
+          fi

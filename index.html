@@ -374,7 +374,7 @@
 
 <div class="credit">
   Forecast by <a href="https://open-meteo.com/">Open-Meteo.com</a> · Radar by <a href="https://www.rainviewer.com/">RainViewer</a> ·
-  Map © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> © <a href="https://carto.com/attributions">CARTO</a>
+  Map © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors
   <span id="battNote"></span>
 </div>
 
@@ -772,8 +772,14 @@ function initMap() {
     zoomControl: false, dragging: false, scrollWheelZoom: false, doubleClickZoom: false,
     touchZoom: false, boxZoom: false, keyboard: false, attributionControl: true,
   }).setView([CONFIG.lat, CONFIG.lon], 7);
-  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-    attribution: "© OpenStreetMap © CARTO", subdomains: "abcd", maxZoom: 19,
+  // Keyless OpenStreetMap tiles, darkened with a CSS filter on their own pane
+  // (the radar overlay lives in a different pane, so its colours are untouched).
+  map.createPane("base");
+  const basePane = map.getPane("base");
+  basePane.style.zIndex = 150;
+  basePane.style.filter = "invert(1) hue-rotate(180deg) brightness(.9) contrast(.85) saturate(.5)";
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    pane: "base", maxZoom: 19, attribution: "© OpenStreetMap contributors",
   }).addTo(map);
   L.circleMarker([CONFIG.lat, CONFIG.lon], { radius: 7, color: "#130f0d", weight: 2, fillColor: "#ffc97a", fillOpacity: 1 }).addTo(map);
   $("mapBtn").addEventListener("click", () => {

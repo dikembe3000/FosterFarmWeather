@@ -1125,6 +1125,18 @@ function buildHistoryPanels() {
   refreshAll();
   setInterval(refreshAll, CONFIG.refreshMs);
   setInterval(loadForecast, 30 * 60000);
+
+  // Browsers pause timers in background tabs and during sleep, so refresh the moment the page is visible again.
+  let lastWake = 0;
+  const wake = () => {
+    if (document.hidden || Date.now() - lastWake < 20000) return;
+    lastWake = Date.now();
+    tickClock(); tickLive(); refreshAll(); loadForecast();
+    if (map) loadRadar();
+  };
+  document.addEventListener("visibilitychange", wake);
+  window.addEventListener("focus", wake);
+  window.addEventListener("online", wake);
   setInterval(() => { if (map) loadRadar(); }, 10 * 60000);
 })();
 </script>

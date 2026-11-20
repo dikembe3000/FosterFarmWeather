@@ -393,6 +393,7 @@ const CONFIG = {
   staleMinutes: 180,     // newer than this  -> DELAYED, otherwise OFFLINE
   refreshMs: 2 * 60 * 1000,
   radarFrameMs: 700,
+  mapZoom: 9,            // 7 = wide regional view, 8 = county scale, 9 = local area (radar gets blocky above 7)
 };
 
 /* =====================  helpers  ===================== */
@@ -769,7 +770,7 @@ function initMap() {
   map = L.map("map", {
     zoomControl: false, dragging: false, scrollWheelZoom: false, doubleClickZoom: false,
     touchZoom: false, boxZoom: false, keyboard: false, attributionControl: true,
-  }).setView([CONFIG.lat, CONFIG.lon], 7);
+  }).setView([CONFIG.lat, CONFIG.lon], CONFIG.mapZoom);
   // Keyless OpenStreetMap tiles, darkened with a CSS filter on their own pane
   // (the radar overlay lives in a different pane, so its colours are untouched).
   map.createPane("base");
@@ -798,7 +799,7 @@ async function loadRadar() {
     if (!radarFrames.length) throw new Error("no frames");
     radarFrames.forEach(f => {
       radarLayers.push(L.tileLayer(`${j.host}${f.path}/256/{z}/{x}/{y}/2/1_0.png`, {
-        opacity: 0, maxNativeZoom: 7, maxZoom: 9, zIndex: 5, attribution: "Radar © RainViewer",
+        opacity: 0, maxNativeZoom: 7, maxZoom: 12, zIndex: 5, attribution: "Radar © RainViewer",
       }).addTo(map));
     });
     $("mapNote").hidden = true;

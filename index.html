@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Haeger Ave. Weather</title>
+<title>Haeger Ave Weather</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>
@@ -68,6 +68,16 @@
   .sol{grid-column:6/8;grid-row:3}
   .rain{grid-column:8/12;grid-row:1/4;display:flex;flex-direction:column;gap:12px}
   .mapc{grid-column:12/16;grid-row:1/4;padding:0;min-height:430px}
+  .moonc{grid-column:1/16;display:flex;align-items:center;gap:18px;flex-wrap:wrap;padding:14px 18px}
+  .moonc svg{width:60px;height:60px;flex:none}
+  .moonc h3{margin-bottom:4px}
+  .moonc .mn{font-size:22px;font-weight:700;letter-spacing:-.01em}
+  .moonc .ms{color:var(--text2);font-size:13px;margin-top:2px}
+  .moonc .mnext{margin-left:auto;display:flex;gap:28px;flex-wrap:wrap}
+  .moonc .mnext div{text-align:right}
+  .moonc .mnext .lbl{display:block;margin-bottom:3px}
+  .moonc .mnext b{font-size:16px;font-weight:600}
+  .moonc .mnext small{display:block;color:var(--muted);font-size:12px;margin-top:1px}
   .fc{grid-column:1/16}
 
   .big{font-weight:700;letter-spacing:-.02em;line-height:1}
@@ -115,10 +125,10 @@
   .metric .chip{margin-top:8px}
 
   /* rain */
-  .acc3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:4px}
+  .acc3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:4px}
   .acc{border:1px solid var(--line);border-radius:14px;padding:10px 8px;text-align:center;background:rgba(0,0,0,.22)}
   .acc .lbl{display:block;font-size:10px}
-  .acc b{display:block;font-size:clamp(26px,2.5vw,40px);font-weight:700;letter-spacing:-.02em;margin-top:6px;color:var(--sky)}
+  .acc b{display:block;font-size:clamp(22px,2.2vw,34px);font-weight:700;letter-spacing:-.02em;margin-top:6px;color:var(--sky)}
   .acc i{display:block;font-style:normal;font-size:11px;color:var(--muted);margin-top:4px;min-height:14px}
   .bars{flex:1;display:flex;flex-direction:column;min-height:150px}
   .bars .cap{font-size:11px;color:var(--muted);letter-spacing:.08em;margin-bottom:4px}
@@ -190,11 +200,13 @@
     .rain{grid-column:1/5;grid-row:auto}
     .hum,.pres,.uv,.sol{grid-column:span 1;grid-row:auto}
     .mapc{grid-column:1/5;grid-row:auto;min-height:420px}
-    .fc{grid-column:1/5}
+    .fc,.moonc{grid-column:1/5}
   }
   @media (max-width:760px){
     .dash{grid-template-columns:repeat(2,1fr);padding:10px 12px}
-    .temp,.wind,.rain,.mapc,.fc{grid-column:1/3}
+    .temp,.wind,.rain,.mapc,.fc,.moonc{grid-column:1/3}
+    .moonc .mnext{margin-left:0;width:100%;justify-content:space-between}
+    .moonc .mnext div{text-align:left}
     .fcGrid{display:flex;overflow-x:auto;padding-bottom:6px}
     .day{flex:0 0 112px}
     .top{padding:14px 12px 4px}.hist{padding:6px 12px 24px}
@@ -212,7 +224,7 @@
       <g id="logoRays"></g>
     </svg>
     <div>
-      <h1 id="title">Farm Weather</h1>
+      <h1 id="title">Haeger Ave Weather</h1>
       <div class="sub" id="subtitle"></div>
     </div>
   </div>
@@ -330,6 +342,20 @@
     <div class="mapNote" id="mapNote" hidden></div>
   </section>
 
+  <!-- Moon phase -->
+  <section class="card moonc" aria-label="Moon phase">
+    <svg id="moonIcon" viewBox="0 0 64 64" role="img" aria-label="Current moon phase"></svg>
+    <div>
+      <h3>MOON PHASE</h3>
+      <div class="mn" id="moonName">--</div>
+      <div class="ms" id="moonSub"></div>
+    </div>
+    <div class="mnext">
+      <div><span class="lbl">NEXT FULL MOON</span><b id="moonFull">--</b><small id="moonFullT"></small></div>
+      <div><span class="lbl">NEXT NEW MOON</span><b id="moonNew">--</b><small id="moonNewT"></small></div>
+    </div>
+  </section>
+
   <!-- Forecast -->
   <section class="card fc">
     <h3>7-DAY FORECAST <small>Open-Meteo forecast</small></h3>
@@ -383,7 +409,7 @@
 
 /* =====================  CONFIG — edit these  ===================== */
 const CONFIG = {
-  title: "Farm Weather",
+  title: "Haeger Ave Weather",
   subtitle: "Arcata, CA · Home station",
   // Rounded to ~0.1° on purpose: this page is public, so it shows the area, not the exact spot.
   lat: 40.9,
@@ -763,6 +789,74 @@ async function loadForecast() {
   }
 }
 
+/* =====================  moon phase  ===================== */
+const SYNODIC = 29.530588853;
+const rad = d => d * Math.PI / 180;
+
+// Meeus, "Astronomical Algorithms" ch. 49. Integer k = new moon, k + 0.5 = full moon. Returns UTC ms.
+function moonEvent(k) {
+  const full = Math.abs(k % 1) > 0.25;
+  const T = k / 1236.85, T2 = T * T, T3 = T2 * T, T4 = T3 * T;
+  const E = 1 - 0.002516 * T - 0.0000074 * T2;
+  const M  = rad(2.5534 + 29.10535670 * k - 0.0000014 * T2 - 0.00000011 * T3);
+  const Mp = rad(201.5643 + 385.81693528 * k + 0.0107582 * T2 + 0.00001238 * T3 - 0.000000058 * T4);
+  const F  = rad(160.7108 + 390.67050284 * k - 0.0016118 * T2 - 0.00000227 * T3 + 0.000000011 * T4);
+  const Om = rad(124.7746 - 1.56375588 * k + 0.0020672 * T2 + 0.00000215 * T3);
+  const s = Math.sin;
+  const c =
+    (full ? -0.40614 : -0.40720) * s(Mp) +
+    (full ? 0.17302 : 0.17241) * E * s(M) +
+    (full ? 0.01614 : 0.01608) * s(2 * Mp) +
+    (full ? 0.01043 : 0.01039) * s(2 * F) +
+    (full ? 0.00734 : 0.00739) * E * s(Mp - M) +
+    (full ? -0.00515 : -0.00514) * E * s(Mp + M) +
+    (full ? 0.00209 : 0.00208) * E * E * s(2 * M) -
+    0.00111 * s(Mp - 2 * F) - 0.00057 * s(Mp + 2 * F) +
+    0.00056 * E * s(2 * Mp + M) - 0.00042 * s(3 * Mp) +
+    0.00042 * E * s(M + 2 * F) + 0.00038 * E * s(M - 2 * F) -
+    0.00024 * E * s(2 * Mp - M) - 0.00017 * s(Om);
+  const jde = 2451550.09766 + 29.530588861 * k + 0.00015437 * T2 - 0.00000015 * T3 + 0.00000000073 * T4 + c;
+  return (jde - 2440587.5) * 86400000 - 69000;   // about 69 s to convert dynamical time to UTC
+}
+
+const MOON_NAMES = [[1.85, "New Moon"], [5.54, "Waxing Crescent"], [9.23, "First Quarter"], [12.92, "Waxing Gibbous"],
+  [16.61, "Full Moon"], [20.30, "Waning Gibbous"], [23.99, "Last Quarter"], [27.68, "Waning Crescent"], [Infinity, "New Moon"]];
+
+function moonInfo(now) {
+  const k0 = Math.floor((now / 86400000 + 2440587.5 - 2451545) / 365.2425 * 12.3685);
+  let prevNew = null, nextNew = null, nextFull = null;
+  for (let k = k0 - 2; k <= k0 + 3; k++) {
+    const n = moonEvent(k), f = moonEvent(k + 0.5);
+    if (n <= now) prevNew = n; else if (nextNew === null) nextNew = n;
+    if (f > now && nextFull === null) nextFull = f;
+  }
+  const frac = (now - prevNew) / (nextNew - prevNew);
+  const age = frac * SYNODIC;
+  return { frac, age, illum: (1 - Math.cos(2 * Math.PI * frac)) / 2, name: MOON_NAMES.find(n => age < n[0])[1], nextFull, nextNew };
+}
+
+// Lit part of the disc for a cycle fraction (0 = new, 0.5 = full). Northern-hemisphere view: waxing = lit on the right.
+function moonPath(frac) {
+  const k = Math.cos(2 * Math.PI * frac), r = 26, c = 32;
+  const rx = Math.max(0.01, r * Math.abs(k));
+  const waxing = frac <= 0.5;
+  const outer = waxing ? 1 : 0;
+  const inner = waxing ? (k > 0 ? 0 : 1) : (k > 0 ? 1 : 0);
+  return `M ${c} ${c - r} A ${r} ${r} 0 0 ${outer} ${c} ${c + r} A ${rx.toFixed(2)} ${r} 0 0 ${inner} ${c} ${c - r} Z`;
+}
+
+function renderMoon() {
+  const m = moonInfo(Date.now());
+  $("moonIcon").innerHTML =
+    `<circle cx="32" cy="32" r="26" fill="#2a2420" stroke="rgba(255,255,255,.22)" stroke-width="1.5"/>` +
+    `<path d="${moonPath(m.frac)}" fill="#f1e6c8"/>`;
+  setText("moonName", m.name);
+  setText("moonSub", `${Math.round(m.illum * 100)}% illuminated · ${m.age.toFixed(1)} days old`);
+  const day = t => new Date(t).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: TZ });
+  setText("moonFull", day(m.nextFull)); setText("moonFullT", "at " + fmtClock(m.nextFull));
+  setText("moonNew", day(m.nextNew));   setText("moonNewT", "at " + fmtClock(m.nextNew));
+}
+
 /* =====================  radar map  ===================== */
 let map = null, radarLayers = [], radarFrames = [], radarIdx = 0, radarTimer = null, radarPlaying = true;
 function initMap() {
@@ -1120,6 +1214,8 @@ function buildHistoryPanels() {
     renderTable();
   });
 
+  renderMoon();
+  setInterval(renderMoon, 30 * 60000);
   initMap();
   loadForecast();
   refreshAll();
